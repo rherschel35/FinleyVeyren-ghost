@@ -193,7 +193,13 @@ class GhostCommands(commands.Cog):
             "starting a conversation between the two of you."
         )
         line = await personality.speak(cue, max_tokens=150)
-        await interaction.followup.send(line)
+        # Send as a normal channel message rather than the interaction followup -
+        # the other ghost's bot reads this over the gateway to reply, and an
+        # interaction-followup message doesn't reliably carry its content to
+        # other bots the way a plain message does. Clean up the "thinking..."
+        # placeholder so it doesn't linger next to the real message.
+        await interaction.delete_original_response()
+        await interaction.channel.send(line)
 
 
 async def setup(bot: commands.Bot):
