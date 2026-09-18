@@ -10,16 +10,31 @@ Passive presence: the ghost noticing things without being asked.
   memory as if the ghost had been listening the whole time.
 - Extra attention on anyone currently under a /haunt effect (framed here
   as being watched over, not stalked).
+- A capped, on-demand exchange with the other ghost bot (Mordy Velmora),
+  triggered by /interact - see cogs/commands.py for the command itself.
 """
 
 import logging
 import os
 import random
+import time
 
 import discord
 from discord.ext import commands, tasks
 
 log = logging.getLogger("veyren.haunting")
+
+# The other ghost bot this one can exchange a few words with via /interact.
+# Set via env vars so either bot can point at the other without code changes.
+OTHER_GHOST_ID_RAW = os.getenv("OTHER_GHOST_ID")
+OTHER_GHOST_ID = int(OTHER_GHOST_ID_RAW) if OTHER_GHOST_ID_RAW and OTHER_GHOST_ID_RAW.isdigit() else None
+OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
+
+# How many times THIS bot will speak in a single /interact exchange before
+# going quiet again, and how long an idle exchange stays "open" before a
+# fresh /interact is needed to restart it.
+EXCHANGE_MAX_TURNS = 3
+EXCHANGE_TIMEOUT_SECONDS = 300
 
 # Words/phrases that might catch the ghost's attention. Matched as substrings,
 # case-insensitively, against ordinary message content (apostrophes are
@@ -64,6 +79,9 @@ class Haunting(commands.Cog):
         self.whisper_min = int(os.getenv("WHISPER_MIN_MINUTES", "45"))
         self.whisper_max = int(os.getenv("WHISPER_MAX_MINUTES", "180"))
         self._whisper_loop_started = False
+        # channel_id -> {"count": int, "last_at": float} - this bot's own
+        # turn budget for an active /interact exchange in that channel.
+        self.exchange_turns = {}
 
     def cog_unload(self):
         if self.whisper_loop.is_running():
@@ -118,9 +136,50 @@ class Haunting(commands.Cog):
     async def before_whisper_loop(self):
         await self.bot.wait_until_ready()
 
+    async def _maybe_reply_to_other_ghost(self, message: discord.Message):
+        """Handle a message from the other ghost bot during an /interact
+        exchange. Stays within this bot's own turn budget for the channel
+        and goes quiet once that's spent or the exchange has gone stale."""
+        channel_id = message.channel.id
+        now = time.time()
+        state = self.exchange_turns.get(channel_id)
+        if state and now - state["last_at"] > EXCHANGE_TIMEOUT_SECONDS:
+            state = None  # exchange went stale, needs a fresh /interact
+        if state is None or state["count"] >= EXCHANGE_MAX_TURNS:
+            return
+
+        personality = self.bot.get_cog("Personality")
+        if not personality:
+            return
+
+        content = message.content or ""
+        cue = (
+            f'{OTHER_GHOST_NAME}, another spirit who shares this place with you, just said: '
+            f'"{content}". Reply directly to them, in character, as part of a brief public '
+            "back-and-forth between the two of you. Keep it short and let your personalities "
+            "play off each other."
+        )
+
+        async with message.channel.typing():
+            line = await personality.speak(cue, max_tokens=150)
+
+        try:
+            await message.channel.send(line)
+        except discord.HTTPException:
+            log.exception("Failed to send cross-ghost reply in %s", channel_id)
+            return
+
+        state["count"] += 1
+        state["last_at"] = time.time()
+        self.exchange_turns[channel_id] = state
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild:
+        if message.author.bot:
+            if OTHER_GHOST_ID and message.author.id == OTHER_GHOST_ID and message.guild:
+                await self._maybe_reply_to_other_ghost(message)
+            return
+        if not message.guild:
             return
         if self.allowed_channel_ids and message.channel.id not in self.allowed_channel_ids:
             return
@@ -182,5 +241,7 @@ class Haunting(commands.Cog):
             log.exception("Failed to send reaction in %s", message.channel.id)
 
 
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Haunting(bot))
 async def setup(bot: commands.Bot):
     await bot.add_cog(Haunting(bot))
