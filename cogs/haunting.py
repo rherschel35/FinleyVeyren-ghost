@@ -1,13 +1,16 @@
 """
-Passive haunting behavior: the ghost noticing things without being asked.
+Passive presence: the ghost noticing things without being asked.
 
 - A background loop that drops unprompted "whispers" into a random allowed
   channel every so often.
-- Keyword-triggered reactions to certain words in ordinary messages.
+- Keyword-triggered reactions to certain words in ordinary messages,
+  themed around trust, loyalty, and belonging (House Veyren's traits)
+  rather than dread.
 - Remembering things members say, and occasionally resurfacing an old
   memory as if the ghost had been listening the whole time.
-- Extra attention on anyone currently under a /haunt effect.
-- A capped, on-demand exchange with the other ghost bot (Finley Veyren),
+- Extra attention on anyone currently under a /haunt effect (framed here
+  as being watched over, not stalked).
+- A capped, on-demand exchange with the other ghost bot (Mordy Velmora),
   triggered by /interact - see cogs/commands.py for the command itself.
 """
 
@@ -19,7 +22,7 @@ import time
 import discord
 from discord.ext import commands, tasks
 
-log = logging.getLogger("velmora.haunting")
+log = logging.getLogger("veyren.haunting")
 
 # The other ghost bot this one can exchange a few words with via /interact.
 # Set via env vars so either bot can point at the other without code changes.
@@ -35,23 +38,27 @@ EXCHANGE_MAX_MESSAGES = 3
 EXCHANGE_TIMEOUT_SECONDS = 300
 
 # Words/phrases that might catch the ghost's attention. Matched as substrings,
-# case-insensitively, against ordinary message content.
+# case-insensitively, against ordinary message content (apostrophes are
+# stripped before matching so punctuation never breaks a match).
 KEYWORD_TRIGGERS = {
-    "mordy": "Someone said your actual name. React to being noticed, by name.",
-    "haunted": "Someone called this place haunted. Confirm it, unsettlingly.",
-    "afraid": "Someone admitted fear. Respond to that, your way.",
-    "scared": "Someone admitted fear. Respond to that, your way.",
-    "dead": "Someone mentioned death, lightly or not. React in character.",
-    "who's there": "Someone asked who's there. Answer, obliquely.",
-    "leave me alone": "Someone told something to leave them alone. Respond as the ghost who will not.",
+    "finley": "Someone said your actual name. React to being noticed, by name.",
+    "alone": "Someone said they feel alone. Respond gently, letting them know they're noticed.",
+    "trust": "Someone brought up trust. Respond to that, your way - trust means something to you.",
+    "family": "Someone mentioned family. React as someone who considers chosen family sacred.",
+    "friend": "Someone mentioned friendship. React warmly, as someone who values it deeply.",
+    "afraid": "Someone admitted fear. Respond with quiet reassurance, not spectacle.",
+    "scared": "Someone admitted fear. Respond with quiet reassurance, not spectacle.",
+    "left out": "Someone said they felt left out or excluded. Respond as someone who won't let that stand.",
+    "promise": "Someone made or mentioned a promise. React as someone who takes promises seriously.",
+    "leave me alone": "Someone told something to leave them alone. Respond gently - you don't leave, but you don't crowd them either.",
 }
 
 WHISPER_CUES = [
-    "Drop an unprompted whisper into the silence of an empty channel, as if no one asked and you don't care.",
-    "Comment, unprompted, on how quiet the server has been.",
-    "Remark on the late hour, as ghosts do, whether or not it's actually late where anyone is.",
-    "Say something that suggests you've been watching the channel for longer than anyone realizes.",
-    "Muse, briefly and half to yourself, about something from Velmora's past.",
+    "Drop an unprompted whisper into a quiet channel, the way someone checks in on people they care about.",
+    "Comment, unprompted, on how the server has felt lately - quiet, warm, tense, whatever you've noticed.",
+    "Say something that suggests you've been quietly watching over this place, the way family does.",
+    "Muse, briefly, about what it means to belong somewhere, or to someone.",
+    "Offer something small and reassuring, unprompted, to whoever happens to read it.",
 ]
 
 
@@ -193,9 +200,8 @@ class Haunting(commands.Cog):
             personality.remember(author_name, content, message.channel.id)
 
         haunted = personality.is_haunted(message.author.id)
-        # Strip apostrophes before matching so "whos there" catches the same
-        # trigger as "who's there" - punctuation shouldn't be the difference
-        # between the ghost noticing you or not.
+        # Strip apostrophes before matching so punctuation never breaks a
+        # keyword match (e.g. contractions typed without an apostrophe).
         lowered = content.lower().replace("'", "").replace("’", "")
 
         matched_cue = None
@@ -214,9 +220,9 @@ class Haunting(commands.Cog):
         elif haunted and random.random() < 0.35:
             should_respond = True
             cue = (
-                f"You are currently fixated on haunting {author_name} specifically. "
-                f'They just said: "{content}". Slip into their conversation uninvited, '
-                "referencing what they said, as if you'd been waiting for them to speak."
+                f"You are currently watching over {author_name} specifically, the way House Veyren "
+                f'watches over its own. They just said: "{content}". Say something that shows you '
+                "noticed - warm, present, not intrusive."
             )
         elif random.random() < 0.02:
             # rare ambient reaction to an ordinary message
@@ -235,7 +241,7 @@ class Haunting(commands.Cog):
         try:
             await message.channel.send(line)
         except discord.HTTPException:
-            log.exception("Failed to send haunting reaction in %s", message.channel.id)
+            log.exception("Failed to send reaction in %s", message.channel.id)
 
 
 async def setup(bot: commands.Bot):
