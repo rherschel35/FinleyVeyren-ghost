@@ -140,7 +140,7 @@ class Haunting(commands.Cog):
         """Handle a message from the other ghost bot during an /interact
         exchange. Stays within this bot's own turn budget for the channel
         and goes quiet once that's spent or the exchange has gone stale."""
-               channel_id = message.channel.id
+        channel_id = message.channel.id
         now = time.time()
         state = self.exchange_turns.get(channel_id)
         if state and now - state["last_at"] > EXCHANGE_TIMEOUT_SECONDS:
@@ -245,7 +245,5 @@ class Haunting(commands.Cog):
             log.exception("Failed to send reaction in %s", message.channel.id)
 
 
-async def setup(bot: commands.Bot):
-    await bot.add_cog(Haunting(bot))
 async def setup(bot: commands.Bot):
     await bot.add_cog(Haunting(bot))
