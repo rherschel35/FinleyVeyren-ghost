@@ -140,12 +140,16 @@ class Haunting(commands.Cog):
         """Handle a message from the other ghost bot during an /interact
         exchange. Stays within this bot's own turn budget for the channel
         and goes quiet once that's spent or the exchange has gone stale."""
-        channel_id = message.channel.id
+               channel_id = message.channel.id
         now = time.time()
         state = self.exchange_turns.get(channel_id)
         if state and now - state["last_at"] > EXCHANGE_TIMEOUT_SECONDS:
-            state = None  # exchange went stale, needs a fresh /interact
-        if state is None or state["count"] >= EXCHANGE_MAX_TURNS:
+            state = None  # exchange went stale, treat the next call as fresh
+        if state is None:
+            # Hearing the other ghost speak is itself the start of this
+            # bot's side of the exchange - no local /interact required.
+            state = {"count": 0, "last_at": now}
+        if state["count"] >= EXCHANGE_MAX_TURNS:
             return
 
         personality = self.bot.get_cog("Personality")
