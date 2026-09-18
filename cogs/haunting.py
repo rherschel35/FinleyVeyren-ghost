@@ -37,6 +37,14 @@ OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
 EXCHANGE_MAX_MESSAGES = 3
 EXCHANGE_TIMEOUT_SECONDS = 300
 
+# A trailing zero-width space, invisible in Discord, appended to every
+# message that's genuinely part of an /interact exchange (both the call-out
+# and every reply). Without this, the other bot's on_message can't tell a
+# deliberate call-out apart from an ordinary whisper or keyword reaction it
+# happened to send - and would end up "replying" to those too. Must match
+# the constant of the same name in cogs/commands.py.
+INTERACT_MARKER = "​"
+
 # Words/phrases that might catch the ghost's attention. Matched as substrings,
 # case-insensitively, against ordinary message content (apostrophes are
 # stripped before matching so punctuation never breaks a match).
@@ -143,6 +151,14 @@ class Haunting(commands.Cog):
         EITHER ghost in this exchange (as far as this bot has observed), so
         the two bots independently converge on the same overall cap without
         sharing any state directly."""
+        content = message.content or ""
+        if not content.endswith(INTERACT_MARKER):
+            # Not a deliberate /interact call-out or reply - just the other
+            # ghost's own autonomous whisper or keyword reaction. Ignore it,
+            # so the two bots don't end up chatting on their own.
+            return
+        content = content[: -len(INTERACT_MARKER)]
+
         channel_id = message.channel.id
         now = time.time()
         state = self.exchange_turns.get(channel_id)
@@ -157,7 +173,6 @@ class Haunting(commands.Cog):
         if not personality:
             return
 
-        content = message.content or ""
         cue = (
             f'{OTHER_GHOST_NAME}, another spirit who shares this place with you, just said: '
             f'"{content}". Reply directly to them, in character, as part of a brief public '
@@ -169,7 +184,7 @@ class Haunting(commands.Cog):
             line = await personality.speak(cue, max_tokens=150)
 
         try:
-            await message.channel.send(line)
+            await message.channel.send(line + INTERACT_MARKER)
         except discord.HTTPException:
             log.exception("Failed to send cross-ghost reply in %s", channel_id)
             return

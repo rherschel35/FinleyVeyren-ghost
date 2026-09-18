@@ -30,6 +30,10 @@ WATCH_DURATION_SECONDS = 60 * 60 * 6  # 6 hours
 
 OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
 
+# Must match the constant of the same name in cogs/haunting.py - marks this
+# message as genuinely part of an /interact exchange (see there for why).
+INTERACT_MARKER = "​"
+
 
 def _load_lore():
     try:
@@ -197,9 +201,11 @@ class GhostCommands(commands.Cog):
         # the other ghost's bot reads this over the gateway to reply, and an
         # interaction-followup message doesn't reliably carry its content to
         # other bots the way a plain message does. Clean up the "thinking..."
-        # placeholder so it doesn't linger next to the real message.
+        # placeholder so it doesn't linger next to the real message. The
+        # trailing marker tells the other ghost's bot this is a genuine
+        # call-out, not just something to eavesdrop on.
         await interaction.delete_original_response()
-        await interaction.channel.send(line)
+        await interaction.channel.send(line + INTERACT_MARKER)
 
 
 async def setup(bot: commands.Bot):
