@@ -23,6 +23,23 @@ log = logging.getLogger("veyren")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DEV_GUILD_ID = os.getenv("DEV_GUILD_ID")  # optional, for instant slash-command sync while testing
 
+
+def _parse_guild_ids(env_value: str | None):
+    """Comma-separated list of server IDs this ghost is allowed to be in.
+    If unset, no restriction is applied (not recommended for a bot with a
+    live token floating around)."""
+    if not env_value:
+        return None
+    ids = set()
+    for part in env_value.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(int(part))
+    return ids or None
+
+
+ALLOWED_GUILD_IDS = _parse_guild_ids(os.getenv("ALLOWED_GUILD_IDS"))
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -37,9 +54,34 @@ INITIAL_COGS = (
 )
 
 
+async def _leave_if_unauthorized(guild: discord.Guild) -> bool:
+    """If this guild isn't on the allowed list, leave immediately and say
+    so in the logs. Returns True if the ghost left."""
+    if ALLOWED_GUILD_IDS and guild.id not in ALLOWED_GUILD_IDS:
+        log.warning(
+            "Not authorized for guild %r (id=%s) - leaving immediately.", guild.name, guild.id
+        )
+        await guild.leave()
+        return True
+    return False
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    """Someone tried to add this ghost to a server it doesn't belong in.
+    Leave right away - it should only ever live in Velmora."""
+    await _leave_if_unauthorized(guild)
+
+
 @bot.event
 async def on_ready():
     log.info("Finley has arrived. Logged in as %s (id=%s)", bot.user, bot.user.id)
+
+    # Catch any unauthorized guild it's already sitting in too - covers a
+    # stale invite link used before ALLOWED_GUILD_IDS was set, or Public
+    # Bot getting flipped back on by accident.
+    for guild in list(bot.guilds):
+        await _leave_if_unauthorized(guild)
 
     try:
         if DEV_GUILD_ID:
