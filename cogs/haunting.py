@@ -38,9 +38,11 @@ EXCHANGE_TIMEOUT_SECONDS = 300
 
 # Words/phrases that might catch the ghost's attention. Matched as substrings,
 # case-insensitively, against ordinary message content (apostrophes are
-# stripped before matching so punctuation never breaks a match).
+# stripped before matching so punctuation never breaks a match). Deliberately
+# keyed to his actual name rather than "ghost" or "veyren"/"velmora" - those
+# get said too often in normal conversation to be a reliable summon.
 KEYWORD_TRIGGERS = {
-    "veyren": "Someone spoke the name of your house. React as if you heard your own name.",
+    "finley": "Someone said your actual name. React to being noticed, by name.",
     "alone": "Someone said they feel alone. Respond gently, letting them know they're noticed.",
     "trust": "Someone brought up trust. Respond to that, your way - trust means something to you.",
     "family": "Someone mentioned family. React as someone who considers chosen family sacred.",
