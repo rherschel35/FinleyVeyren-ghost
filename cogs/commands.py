@@ -7,10 +7,14 @@ Slash commands for interacting with the ghost directly:
 - /lore                - request the next unrevealed fragment of House
                           Veyren's history
 - /mood                - (admin-only) peek at the ghost's current mood
+- /interact            - call out to the other ghost bot for a brief,
+                          capped public exchange
 """
 
 import json
 import logging
+import os
+import time
 from pathlib import Path
 
 import discord
@@ -23,6 +27,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 LORE_PATH = DATA_DIR / "lore.json"
 
 WATCH_DURATION_SECONDS = 60 * 60 * 6  # 6 hours
+
+OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
 
 
 def _load_lore():
@@ -166,6 +172,32 @@ class GhostCommands(commands.Cog):
             )
         else:
             log.exception("Unhandled error in /mood", exc_info=error)
+
+    @app_commands.command(name="interact", description="Call out to the other ghost for a brief exchange.")
+    async def interact_command(self, interaction: discord.Interaction):
+        personality = self._personality()
+        haunting = self.bot.get_cog("Haunting")
+        if not personality or not haunting:
+            await interaction.response.send_message("No answer comes.", ephemeral=True)
+            return
+
+        channel_id = interaction.channel_id
+        # (Re)start this bot's own turn budget for this channel's exchange.
+        haunting.exchange_turns[channel_id] = {"count": 1, "last_at": time.time()}
+
+        await interaction.response.defer(thinking=True)
+
+        cue = (
+            f"Call out, in character, to {OTHER_GHOST_NAME}, a distinct spirit who shares this place "
+            "with you - address them directly, in front of everyone, inviting a response, as if "
+            "starting a conversation between the two of you."
+        )
+        line = await personality.speak(cue, max_tokens=150)
+        await interaction.followup.send(line)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(GhostCommands(bot))
 
 
 async def setup(bot: commands.Bot):
