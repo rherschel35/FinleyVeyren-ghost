@@ -26,8 +26,15 @@ log = logging.getLogger("veyren.personality")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 STORE_PATH = DATA_DIR / "memory_store.json"
+HISTORY_PATH = DATA_DIR / "shared_history.json"
 
 MODEL = os.getenv("VELMORA_MODEL", "claude-haiku-4-5-20251001")
+
+# Which pairings of shared-history stories this ghost is allowed to recall -
+# it should only ever bring up moments it actually took part in. Finley was
+# there for every Finley/Mordy and Cassy/Finley story, but not the
+# Cassy/Mordy ones - those are theirs, not his.
+RELEVANT_HISTORY_PAIRS = {"finley_mordy", "cassy_finley"}
 
 # Moods for a House Veyren spirit lean warm and watchful rather than
 # mournful or menacing - the range runs from encouraging to fiercely
@@ -130,6 +137,18 @@ def _default_state():
     }
 
 
+def _load_shared_history():
+    """The full cross-ghost story bank (all pairings, all ghosts). Each
+    ghost filters it down to just the pairings it was actually part of -
+    see RELEVANT_HISTORY_PAIRS."""
+    try:
+        with open(HISTORY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        log.exception("Failed to load shared_history.json")
+        return []
+
+
 class Personality(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -140,6 +159,7 @@ class Personality(commands.Cog):
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.state = self._load_state()
+        self.shared_history = _load_shared_history()
 
     # ---------- persistence ----------
 
@@ -195,6 +215,14 @@ class Personality(commands.Cog):
             memories = [m for m in memories if m["author"] != exclude_author]
         return random.choice(memories) if memories else None
 
+    # ---------- shared history with the other ghosts ----------
+
+    def random_shared_story(self):
+        """Pick a random past moment this ghost actually took part in, from
+        the shared cross-ghost history bank."""
+        candidates = [s for s in self.shared_history if s.get("pair") in RELEVANT_HISTORY_PAIRS]
+        return random.choice(candidates)["story"] if candidates else None
+
     def memories_about(self, author: str, limit: int = 3):
         memories = [m for m in self.state.get("memories", []) if m["author"] == author]
         return memories[-limit:]
@@ -248,6 +276,18 @@ class Personality(commands.Cog):
                 "You may allude to it if it fits naturally. Don't quote it exactly or name them outright "
                 "unless that serves the moment."
             )
+
+        # Every so often, surface one of the real, specific memories this
+        # ghost shares with the others - not just the vague relationship
+        # summary above, but an actual moment from the story bank.
+        if random.random() < 0.2:
+            story = self.random_shared_story()
+            if story:
+                memory_block += (
+                    f'\n\nA specific memory just surfaced, unprompted, the way old memories do: "{story}" '
+                    "You may allude to it if it genuinely fits what's happening right now - don't force it "
+                    "in, don't narrate the whole thing, and don't quote it verbatim."
+                )
 
         system = SYSTEM_PROMPT_TEMPLATE.format(
             ghost_name=GHOST_NAME,
