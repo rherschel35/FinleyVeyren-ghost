@@ -1,7 +1,8 @@
 """
 Finley Veyren — a Discord bot that plays a gentler, House-Veyren-flavored
-spirit watching over the Velmora server. Entry point: wires up the client,
-loads cogs, and starts the background whisper loop.
+spirit watching over the Velmora server. Entry point: wires up the client
+and loads cogs. He only ever speaks in response to someone; he never starts
+a conversation on his own.
 """
 
 import asyncio
@@ -100,9 +101,6 @@ async def on_ready():
         activity=discord.Activity(type=discord.ActivityType.watching, name=f"over Velmora as {ghost_name}")
     )
 
-    haunting_cog = bot.get_cog("Haunting")
-    if haunting_cog:
-        haunting_cog.start_whisper_loop()
 
 
 async def main():
