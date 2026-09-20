@@ -17,6 +17,7 @@ Passive presence: the ghost noticing things without being asked.
 import logging
 import os
 import random
+import re
 import time
 
 import discord
@@ -191,6 +192,94 @@ class Haunting(commands.Cog):
 
         self.exchange_turns[channel_id] = {"total": total_after_hearing + 1, "last_at": time.time()}
 
+    async def _resolve_reply_chain(self, message: discord.Message, limit: int = 3):
+        """Walk up a Discord reply chain from `message`, nearest first, so a
+        follow-up question can be answered with the context of what was
+        actually said rather than in a vacuum."""
+        chain = []
+        current = message
+        for _ in range(limit):
+            ref = getattr(current, "reference", None)
+            if not ref:
+                break
+            original = ref.resolved if isinstance(ref.resolved, discord.Message) else None
+            if original is None and ref.message_id:
+                try:
+                    original = await current.channel.fetch_message(ref.message_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    break
+            if original is None:
+                break
+            chain.append(original)
+            current = original
+        return chain
+
+    async def _maybe_answer_direct_address(self, message: discord.Message, personality) -> bool:
+        """Someone replied to something this ghost said, or mentioned it by
+        name. Direct address always earns a real answer - no dice roll, no
+        keyword required - and the ghost answers in the reply thread so the
+        exchange stays readable. Returns True if it answered."""
+        me = self.bot.user
+        if me is None:
+            return False
+
+        chain = await self._resolve_reply_chain(message)
+        replying_to_me = bool(chain) and chain[0].author.id == me.id
+        mentioned = any(u.id == me.id for u in message.mentions)
+
+        if not (replying_to_me or mentioned):
+            return False
+
+        author_name = str(message.author.display_name)
+        # Strip raw mention markup so the ghost doesn't read "<@12345>" as words.
+        asked = re.sub(r"<@!?&?\d+>", "", message.content or "").strip()
+        if not asked:
+            return False
+
+        # Hand the exchange over as REAL conversation turns rather than
+        # quoting it inside the prompt. Describing a ghost's own past message
+        # back to it ("you said X") invites it to doubt whether it really did;
+        # passing it as its own assistant turn does not.
+        history = []
+        for msg in reversed(chain):
+            text = (msg.content or "").strip()
+            if not text:
+                continue
+            if msg.author.id == me.id:
+                history.append({"role": "assistant", "content": text})
+            else:
+                history.append({
+                    "role": "user",
+                    "content": f"{msg.author.display_name}: {text}",
+                })
+
+        if replying_to_me:
+            direction = (
+                "Someone has just replied directly to something you said, and their reply is the last "
+                "message above. Answer them, in character, carrying on naturally from your own last "
+                "message. Everything above is a real exchange you were part of - never say you don't "
+                "remember it, never question whether you said it, and never apologise or break character "
+                "to explain yourself. Keep it to a couple of sentences."
+            )
+        else:
+            direction = (
+                "Someone has just spoken to you directly, by name. Answer them in character, briefly."
+            )
+
+        async with message.channel.typing():
+            line = await personality.speak(
+                f"{author_name}: {asked}",
+                max_tokens=250,
+                history=history,
+                direction=direction,
+            )
+
+        try:
+            await message.reply(line, mention_author=False)
+        except discord.HTTPException:
+            log.exception("Failed to answer direct address in %s", message.channel.id)
+        return True
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
@@ -213,6 +302,11 @@ class Haunting(commands.Cog):
         # material to resurface later. Skip very short/low-content ones.
         if len(content.strip()) >= 12:
             personality.remember(author_name, content, message.channel.id)
+
+        # A direct reply to something this ghost said - or an @mention - always
+        # gets a real answer, so follow-up questions actually work.
+        if await self._maybe_answer_direct_address(message, personality):
+            return
 
         haunted = personality.is_haunted(message.author.id)
         # Strip apostrophes before matching so punctuation never breaks a
