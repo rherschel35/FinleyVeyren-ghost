@@ -74,7 +74,7 @@ class GhostCommands(commands.Cog):
             f'{asker} has called a seance and asks you directly: "{question}". '
             "Answer as the ghost - warm and direct, but responsive to what was actually asked."
         )
-        line = await personality.speak(cue, memory_hint=memory_hint, max_tokens=250)
+        line = await personality.speak(cue, memory_hint=memory_hint, max_tokens=220)
 
         embed = discord.Embed(
             description=line,
