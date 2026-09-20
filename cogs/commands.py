@@ -14,6 +14,7 @@ Slash commands for interacting with the ghost directly:
 import json
 import logging
 import os
+import random
 import time
 from pathlib import Path
 
@@ -28,7 +29,15 @@ LORE_PATH = DATA_DIR / "lore.json"
 
 WATCH_DURATION_SECONDS = 60 * 60 * 6  # 6 hours
 
-OTHER_GHOST_NAME = os.getenv("OTHER_GHOST_NAME", "the other ghost")
+# Invisible per-ghost address tags - must match cogs/haunting.py exactly.
+GHOST_TAGS = {
+    "mordy": "\u2060",
+    "finley": "\u2061",
+    "cassy": "\u2062",
+}
+
+OTHER_GHOST_1_NAME = os.getenv("OTHER_GHOST_1_NAME") or os.getenv("OTHER_GHOST_NAME", "Mordy Velmora")
+OTHER_GHOST_2_NAME = os.getenv("OTHER_GHOST_2_NAME", "Cassy Caldrin")
 
 # Must match the constant of the same name in cogs/haunting.py - marks this
 # message as genuinely part of an /interact exchange (see there for why).
@@ -177,13 +186,22 @@ class GhostCommands(commands.Cog):
         else:
             log.exception("Unhandled error in /mood", exc_info=error)
 
-    @app_commands.command(name="interact", description="Call out to the other ghost for a brief exchange.")
-    async def interact_command(self, interaction: discord.Interaction):
+    @app_commands.command(name="interact", description="Call out to another ghost for a brief exchange.")
+    @app_commands.describe(who="Which ghost to call out to. Leave blank and one is picked at random.")
+    @app_commands.choices(who=[
+        app_commands.Choice(name="Mordy Velmora", value="mordy"),
+        app_commands.Choice(name="Cassy Caldrin", value="cassy"),
+    ])
+    async def interact_command(self, interaction: discord.Interaction, who: app_commands.Choice[str] = None):
         personality = self._personality()
         haunting = self.bot.get_cog("Haunting")
         if not personality or not haunting:
             await interaction.response.send_message("No answer comes.", ephemeral=True)
             return
+
+        choice = who.value if who else random.choice(["mordy", "cassy"])
+        target_name = OTHER_GHOST_1_NAME if choice == "mordy" else OTHER_GHOST_2_NAME
+        target_tag = GHOST_TAGS[choice]
 
         channel_id = interaction.channel_id
         # (Re)start the exchange for this channel: this call-out is message 1.
@@ -192,20 +210,18 @@ class GhostCommands(commands.Cog):
         await interaction.response.defer(thinking=True)
 
         cue = (
-            f"Call out, in character, to {OTHER_GHOST_NAME}, a distinct spirit who shares this place "
-            "with you - address them directly, in front of everyone, inviting a response, as if "
-            "starting a conversation between the two of you."
+            f"Call out, in character, to {target_name}, another spirit who shares this place with "
+            "you - address them directly, in front of everyone, inviting a response, as if starting "
+            "a conversation between the two of you."
         )
         line = await personality.speak(cue, max_tokens=150)
-        # Send as a normal channel message rather than the interaction followup -
-        # the other ghost's bot reads this over the gateway to reply, and an
-        # interaction-followup message doesn't reliably carry its content to
-        # other bots the way a plain message does. Clean up the "thinking..."
-        # placeholder so it doesn't linger next to the real message. The
-        # trailing marker tells the other ghost's bot this is a genuine
-        # call-out, not just something to eavesdrop on.
+        # Sent as a plain channel message rather than an interaction followup:
+        # the other ghost's bot reads this over the gateway, and a followup
+        # doesn't reliably carry its content to other bots. The trailing tag
+        # says who it's aimed at; the marker says it's genuine /interact
+        # traffic and not just something to eavesdrop on.
         await interaction.delete_original_response()
-        await interaction.channel.send(line + INTERACT_MARKER)
+        await interaction.channel.send(line + target_tag + INTERACT_MARKER)
 
 
 async def setup(bot: commands.Bot):
