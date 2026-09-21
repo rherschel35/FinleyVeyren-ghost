@@ -86,16 +86,22 @@ INTERACT_MARKER = "​"
 # stripped before matching so punctuation never breaks a match).
 KEYWORD_TRIGGERS = {
     "finley": "Someone said your actual name. React to being noticed, by name.",
-    "alone": "Someone said they feel alone. Respond gently, letting them know they're noticed.",
-    "trust": "Someone brought up trust. Respond to that, your way - trust means something to you.",
-    "family": "Someone mentioned family. React as someone who considers chosen family sacred.",
-    "friend": "Someone mentioned friendship. React warmly, as someone who values it deeply.",
-    "afraid": "Someone admitted fear. Respond with quiet reassurance, not spectacle.",
-    "scared": "Someone admitted fear. Respond with quiet reassurance, not spectacle.",
     "left out": "Someone said they felt left out or excluded. Respond as someone who won't let that stand.",
-    "promise": "Someone made or mentioned a promise. React as someone who takes promises seriously.",
-    "leave me alone": "Someone told something to leave them alone. Respond gently - you don't leave, but you don't crowd them either.",
 }
+
+# Whole-word matching only, so "haunted" doesn't fire inside other words and
+# a name only counts when it's actually the name. Apostrophes are ignored.
+_KEYWORD_PATTERNS = {
+    kw: re.compile(r"\b" + re.escape(kw.replace("'", "")) + r"\b") for kw in KEYWORD_TRIGGERS
+}
+
+
+def match_keyword(content: str):
+    lowered = (content or "").lower().replace("'", "").replace("\u2019", "")
+    for keyword, cue in KEYWORD_TRIGGERS.items():
+        if _KEYWORD_PATTERNS[keyword].search(lowered):
+            return cue
+    return None
 
 
 class Haunting(commands.Cog):
@@ -297,12 +303,7 @@ class Haunting(commands.Cog):
         # keyword match (e.g. contractions typed without an apostrophe).
         lowered = content.lower().replace("'", "").replace("’", "")
 
-        matched_cue = None
-        for keyword, cue in KEYWORD_TRIGGERS.items():
-            normalized_keyword = keyword.replace("'", "")
-            if normalized_keyword in lowered:
-                matched_cue = cue
-                break
+        matched_cue = match_keyword(content)
 
         should_respond = False
         cue = None
@@ -317,7 +318,7 @@ class Haunting(commands.Cog):
                 f'watches over its own. They just said: "{content}". Say something that shows you '
                 "noticed - warm, present, not intrusive."
             )
-        elif random.random() < 0.02:
+        elif random.random() < 0.01:
             # rare ambient reaction to an ordinary message
             should_respond = True
             cue = f'Someone said: "{content}". React to it in passing, briefly, as an aside.'
