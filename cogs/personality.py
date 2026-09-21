@@ -12,6 +12,7 @@ talking to the Claude API directly, so the voice stays consistent everywhere
 the ghost speaks.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -21,6 +22,8 @@ from pathlib import Path
 
 from anthropic import AsyncAnthropic
 from discord.ext import commands
+
+from cogs.diary import DiaryMixin
 
 log = logging.getLogger("veyren.personality")
 
@@ -42,6 +45,7 @@ NOTES_EVERY_N_MESSAGES = 25   # condense after this many new remembered messages
 NOTES_SOURCE_MESSAGES = 30    # how much recent talk to condense from
 NOTES_INJECTED = 8            # how many notes the ghost carries into a reply
 MAX_NOTES = 30                # total notes kept before the oldest fall away
+RECENT_CONTEXT_MESSAGES = 20  # raw recent messages carried into every reply
 
 MODEL = os.getenv("VELMORA_MODEL", "claude-haiku-4-5-20251001")
 
@@ -157,6 +161,23 @@ FALLBACK_LINES = [
 ]
 
 
+
+def _ago(ts) -> str:
+    """How long ago, in plain words: 'just now', '25 min ago', '3 hours ago'."""
+    try:
+        secs = max(0, time.time() - float(ts))
+    except (TypeError, ValueError):
+        return "a while ago"
+    if secs < 90:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs // 60)} min ago"
+    if secs < 86400:
+        h = int(secs // 3600)
+        return f"{h} hour{'s' if h != 1 else ''} ago"
+    d = int(secs // 86400)
+    return f"{d} day{'s' if d != 1 else ''} ago"
+
 def _default_state():
     return {
         "mood": random.choice(MOODS),
@@ -235,7 +256,10 @@ def _build_lore_block(lore: dict, self_key: str) -> str:
     return "\n\n" + "\n\n".join(sections)
 
 
-class Personality(commands.Cog):
+class Personality(DiaryMixin, commands.Cog):
+    DIARY_GHOST_NAME = GHOST_NAME
+    DIARY_MODEL = MODEL
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -247,6 +271,14 @@ class Personality(commands.Cog):
         self.state = self._load_state()
         self.shared_history = _load_shared_history()
         self.lore_block = _build_lore_block(_load_velmora_lore(), SELF_LORE_KEY)
+
+        # Long-term memory: seed the diary from what's already remembered (first
+        # run only), and write up any finished days still waiting.
+        self.diary_backfill_from_memories()
+        try:
+            asyncio.get_running_loop().create_task(self.write_pending_diary())
+        except RuntimeError:
+            pass
 
     # ---------- persistence ----------
 
@@ -292,6 +324,7 @@ class Personality(commands.Cog):
         self.state.setdefault("memories", []).append(
             {"author": author, "content": content[:300], "channel_id": channel_id, "ts": time.time()}
         )
+        self.diary_record(author, content, time.time())
         # keep it bounded
         self.state["memories"] = self.state["memories"][-200:]
         self.state["messages_since_notes"] = self.state.get("messages_since_notes", 0) + 1
@@ -321,6 +354,15 @@ class Personality(commands.Cog):
 
     def recent_notes(self, limit: int = NOTES_INJECTED):
         return [n["text"] for n in self.state.get("notes", [])][-limit:]
+
+    def recent_timed_notes(self, limit: int = NOTES_INJECTED):
+        return [(n["text"], n.get("ts")) for n in self.state.get("notes", [])][-limit:]
+
+    def recent_conversation(self, limit: int = RECENT_CONTEXT_MESSAGES, max_age_hours: float = 12):
+        """The last few remembered messages from roughly the last half-day."""
+        cutoff = time.time() - max_age_hours * 3600
+        recent = [m for m in self.state.get("memories", []) if m.get("ts", 0) >= cutoff]
+        return recent[-limit:]
 
     async def update_notes(self):
         """Condense the recent things people said into one or two durable
@@ -489,14 +531,30 @@ class Personality(commands.Cog):
                     "in, don't narrate the whole thing, and don't quote it verbatim."
                 )
 
-        notes = self.recent_notes()
-        if notes:
+        timed_notes = self.recent_timed_notes()
+        if timed_notes:
             memory_block += (
                 "\n\nWHAT HAS BEEN HAPPENING IN VELMORA LATELY - your own observations, oldest first:\n"
-                + "\n".join(f"- {n}" for n in notes)
+                + "\n".join(f"- ({_ago(ts)}) {text}" for text, ts in timed_notes)
                 + "\nThis is real, current context about the people here. Reference it naturally if it "
                 "fits what's being said right now - don't recite it, don't list it, and don't force it in."
             )
+
+        # The raw last stretch of conversation, so the ghost knows what's
+        # been said in the last few hours - not just what made it into notes.
+        recent = self.recent_conversation()
+        if recent:
+            memory_block += (
+                "\n\nTHE MOST RECENT THINGS PEOPLE SAID HERE, oldest first - this is what you've just "
+                "been hearing:\n"
+                + "\n".join(f'- ({_ago(m["ts"])}) {m["author"]}: {m["content"]}' for m in recent)
+                + "\nYou remember all of this. If someone asks what's been going on, or refers back to "
+                "something said recently, this is where the answer is. Don't recite it unprompted."
+            )
+
+        # Long-term memory: the past week's diary, plus any older days that
+        # what's being said points back to.
+        memory_block += self.diary_block(user_prompt)
 
         system = SYSTEM_PROMPT_TEMPLATE.format(
             ghost_name=GHOST_NAME,
