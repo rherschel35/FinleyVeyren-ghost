@@ -3,11 +3,12 @@
 A Discord bot that plays Finley Veyren, a gentler spirit watching over the
 "Velmora" server, carrying House Veyren's traits: deep trust, chosen family,
 and quiet empathy ("Some bonds need no words"). Like Mordy Velmora, it speaks
-in character via the Claude API (dynamic, not canned lines), drops unprompted
-whispers, reacts to keywords, remembers things members say and brings them up
-later, and answers direct questions through `/seance`. Instead of `/haunt`,
-it has `/watch` - it quietly checks in on a member for a while, protective
-rather than threatening. `/lore` slowly reveals House Veyren's history.
+in character via the Claude API (dynamic, not canned lines) when someone has
+spoken — keyword reactions, replies and mentions, and the occasional aside —
+remembers things members say and brings them up later, and answers direct
+questions through `/seance`. Instead of `/haunt`, it has `/watch` - it quietly
+checks in on a member for a while, protective rather than threatening. `/lore`
+slowly reveals House Veyren's history.
 
 The name is configurable via `GHOST_NAME` in `.env` if you ever want to
 rename it.
@@ -42,10 +43,10 @@ the first time).
 ## Structure
 
 ```
-bot.py                 # entrypoint, client setup, background whisper loop
+bot.py                 # entrypoint and client setup
 cogs/
   personality.py       # Claude API wrapper + ghost voice/mood/memory
-  haunting.py           # passive behaviors: whispers, keyword reactions, memory recall
+  haunting.py           # passive behaviors: keyword reactions, memory recall, watch asides
   commands.py           # /seance, /watch, /lore, /mood
 data/
   memory_store.json     # persisted member quotes + mood + watch targets (runtime-created)
@@ -61,6 +62,7 @@ data/
   call fails.
 - State (mood, memories, watch targets, lore progress) is persisted to a
   small JSON file in `data/` so it survives restarts.
+- Academy rumors (`/rumor` and the scheduled posts) live in Housecup.
 - Costs are pay-as-you-go against your Anthropic account, same as Mordy
   Velmora - realistically well under $1/month at typical Discord-server
   volume, but worth setting a spend limit in the Anthropic console.
